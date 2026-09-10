@@ -12,8 +12,11 @@ import publicLinkRoutes from './routes/public.js';
 
 const app = express();
 
+// Render sits in front of the app and forwards client IP headers.
+// Without this, express-rate-limit cannot safely interpret X-Forwarded-For.
+app.set('trust proxy', 1);
 
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+app.use(cors({ origin: process.env.FRONTEND_URL }));
 app.use(express.json());
 app.use(morgan('dev'));
 
