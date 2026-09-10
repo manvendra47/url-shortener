@@ -16,7 +16,7 @@ const app = express();
 // Without this, express-rate-limit cannot safely interpret X-Forwarded-For.
 app.set('trust proxy', 1);
 
-app.use(cors({ origin: process.env.FRONTEND_URL }));
+app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
 
