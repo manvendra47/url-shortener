@@ -16,11 +16,16 @@ function computeStatus(link) {
   return 'active';
 }
 
+function normalizeBaseUrl(baseUrl) {
+  return String(baseUrl || '').replace(/\/+$/, '');
+}
+
 function serializeLink(link, baseUrl) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   return {
     id: link.id,
     shortCode: link.short_code,
-    shortUrl: `${baseUrl}/${link.short_code}`,
+    shortUrl: `${normalizedBaseUrl}/${link.short_code}`,
     originalUrl: link.original_url,
     title: link.title,
     clickCount: link.click_count,
@@ -139,7 +144,7 @@ router.get('/:id/qr', async (req, res) => {
   ]);
   const link = linkResult.rows[0];
   if (!link) return res.status(404).json({ error: 'Link not found' });
-  const shortUrl = `${process.env.BASE_URL}/${link.short_code}`;
+  const shortUrl = `${normalizeBaseUrl(process.env.BASE_URL)}/${link.short_code}`;
   try {
     const dataUrl = await QRCode.toDataURL(shortUrl, {
       width: 320,
