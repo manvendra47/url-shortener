@@ -13,7 +13,22 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    load();
+    void load();
+
+    const intervalId = window.setInterval(() => {
+      void load();
+    }, 25000);
+
+    const handleFocus = () => {
+      void load();
+    };
+
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   async function load() {
@@ -22,6 +37,7 @@ export default function Dashboard() {
       const { links, summary } = await fetchLinks();
       setLinks(links);
       setSummary(summary);
+      setError(null);
     } catch {
       setError('Could not load your links. Try refreshing.');
     } finally {

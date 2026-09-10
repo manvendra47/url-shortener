@@ -1,14 +1,12 @@
 import { customAlphabet } from 'nanoid';
-import { db } from '../db/init.js';
+import { pool } from '../db/init.js';
 
 // Unambiguous alphabet: no 0/O, 1/l/I confusion
 const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const length = Number(process.env.SHORT_CODE_LENGTH || 7);
 const generate = customAlphabet(alphabet, length);
 
-const existsStmt = db.prepare('SELECT 1 FROM links WHERE short_code = ?');
-
-export function generateUniqueShortCode() {
+export async function generateUniqueShortCode() {
   let code;
   let attempts = 0;
   do {
@@ -17,7 +15,11 @@ export function generateUniqueShortCode() {
     if (attempts > 10) {
       throw new Error('Could not generate a unique short code, try again');
     }
-  } while (existsStmt.get(code));
+    const result = await pool.query('SELECT 1 FROM links WHERE short_code = $1', [code]);
+    if (result.rows[0]) {
+      code = null;
+    }
+  } while (!code);
   return code;
 }
 

@@ -2,33 +2,12 @@ import { Router } from 'express';
 import validator from 'validator';
 import bcrypt from 'bcryptjs';
 import QRCode from 'qrcode';
-import { db } from '../db/init.js';
+import { pool } from '../db/init.js';
 import { requireAuth } from '../middleware/auth.js';
 import { generateUniqueShortCode, isValidCustomCode } from '../utils/shortCode.js';
 
 const router = Router();
 router.use(requireAuth);
-
-const insertLink = db.prepare(`
-  INSERT INTO links
-    (user_id, short_code, original_url, title, max_clicks, expires_at, link_password_hash, require_preview)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`);
-const listLinksStmt = db.prepare(`
-  SELECT * FROM links WHERE user_id = ? ORDER BY created_at DESC
-`);
-const getLinkStmt = db.prepare('SELECT * FROM links WHERE id = ? AND user_id = ?');
-const getLinkByCodeStmt = db.prepare('SELECT 1 FROM links WHERE short_code = ?');
-const deleteLinkStmt = db.prepare('DELETE FROM links WHERE id = ? AND user_id = ?');
-const updateLinkStmt = db.prepare(`
-  UPDATE links
-  SET is_active = ?, require_preview = ?, link_password_hash = ?
-  WHERE id = ? AND user_id = ?
-`);
-const recentClicksStmt = db.prepare(`
-  SELECT clicked_at, referrer, user_agent FROM clicks
-  WHERE link_id = ? ORDER BY clicked_at DESC LIMIT 20
-`);
 
 function computeStatus(link) {
   if (!link.is_active) return 'disabled';
@@ -47,16 +26,16 @@ function serializeLink(link, baseUrl) {
     clickCount: link.click_count,
     maxClicks: link.max_clicks,
     expiresAt: link.expires_at,
-    isActive: !!link.is_active,
-    hasPassword: !!link.link_password_hash,
-    requirePreview: !!link.require_preview,
+    isActive: Boolean(link.is_active),
+    hasPassword: Boolean(link.link_password_hash),
+    requirePreview: Boolean(link.require_preview),
     status: computeStatus(link),
     createdAt: link.created_at,
   };
 }
 
 // Create a new short link
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { originalUrl, customCode, title, expiresAt, maxClicks, password, requirePreview } =
     req.body || {};
 
@@ -71,18 +50,19 @@ router.post('/', (req, res) => {
         error: 'Custom code must be 3-20 characters: letters, numbers, - or _',
       });
     }
-    if (getLinkByCodeStmt.get(customCode)) {
+    const existing = await pool.query('SELECT 1 FROM links WHERE short_code = $1', [customCode]);
+    if (existing.rows[0]) {
       return res.status(409).json({ error: 'That custom code is already taken' });
     }
     shortCode = customCode;
   } else {
-    shortCode = generateUniqueShortCode();
+    shortCode = await generateUniqueShortCode();
   }
 
   let expiresAtIso = null;
   if (expiresAt) {
     const d = new Date(expiresAt);
-    if (isNaN(d.getTime())) {
+    if (Number.isNaN(d.getTime())) {
       return res.status(400).json({ error: 'expiresAt must be a valid date' });
     }
     if (d.getTime() <= Date.now()) {
@@ -108,43 +88,56 @@ router.post('/', (req, res) => {
     passwordHash = bcrypt.hashSync(password, 10);
   }
 
-  const info = insertLink.run(
-    req.user.id,
-    shortCode,
-    originalUrl,
-    title || null,
-    maxClicksVal,
-    expiresAtIso,
-    passwordHash,
-    requirePreview ? 1 : 0
+  const insertResult = await pool.query(
+    `INSERT INTO links
+      (user_id, short_code, original_url, title, max_clicks, expires_at, link_password_hash, require_preview)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *`,
+    [req.user.id, shortCode, originalUrl, title || null, maxClicksVal, expiresAtIso, passwordHash, requirePreview ? true : false]
   );
-  const link = getLinkStmt.get(info.lastInsertRowid, req.user.id);
+  const link = insertResult.rows[0];
   res.status(201).json({ link: serializeLink(link, process.env.BASE_URL) });
 });
 
 // List all of the current user's links
-router.get('/', (req, res) => {
-  const links = listLinksStmt.all(req.user.id);
+router.get('/', async (req, res) => {
+  const result = await pool.query(
+    'SELECT * FROM links WHERE user_id = $1 ORDER BY created_at DESC',
+    [req.user.id]
+  );
+  const links = result.rows;
   res.json({
     links: links.map((l) => serializeLink(l, process.env.BASE_URL)),
     summary: {
       totalLinks: links.length,
-      totalClicks: links.reduce((sum, l) => sum + l.click_count, 0),
+      totalClicks: links.reduce((sum, l) => sum + Number(l.click_count), 0),
     },
   });
 });
 
 // Get a single link with recent click activity
-router.get('/:id', (req, res) => {
-  const link = getLinkStmt.get(req.params.id, req.user.id);
+router.get('/:id', async (req, res) => {
+  const linkResult = await pool.query('SELECT * FROM links WHERE id = $1 AND user_id = $2', [
+    req.params.id,
+    req.user.id,
+  ]);
+  const link = linkResult.rows[0];
   if (!link) return res.status(404).json({ error: 'Link not found' });
-  const recentClicks = recentClicksStmt.all(link.id);
-  res.json({ link: serializeLink(link, process.env.BASE_URL), recentClicks });
+
+  const recentClickResult = await pool.query(
+    'SELECT clicked_at, referrer, user_agent FROM clicks WHERE link_id = $1 ORDER BY clicked_at DESC LIMIT 20',
+    [link.id]
+  );
+  res.json({ link: serializeLink(link, process.env.BASE_URL), recentClicks: recentClickResult.rows });
 });
 
 // Get a QR code (PNG data URL) for a link
 router.get('/:id/qr', async (req, res) => {
-  const link = getLinkStmt.get(req.params.id, req.user.id);
+  const linkResult = await pool.query('SELECT * FROM links WHERE id = $1 AND user_id = $2', [
+    req.params.id,
+    req.user.id,
+  ]);
+  const link = linkResult.rows[0];
   if (!link) return res.status(404).json({ error: 'Link not found' });
   const shortUrl = `${process.env.BASE_URL}/${link.short_code}`;
   try {
@@ -160,14 +153,18 @@ router.get('/:id/qr', async (req, res) => {
 });
 
 // Update a link: enable/disable, toggle the preview interstitial, set/change/remove its password
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   const { isActive, requirePreview, password, removePassword } = req.body || {};
-  const link = getLinkStmt.get(req.params.id, req.user.id);
+  const linkResult = await pool.query('SELECT * FROM links WHERE id = $1 AND user_id = $2', [
+    req.params.id,
+    req.user.id,
+  ]);
+  const link = linkResult.rows[0];
   if (!link) return res.status(404).json({ error: 'Link not found' });
 
-  const nextIsActive = typeof isActive === 'boolean' ? isActive : !!link.is_active;
+  const nextIsActive = typeof isActive === 'boolean' ? isActive : Boolean(link.is_active);
   const nextRequirePreview =
-    typeof requirePreview === 'boolean' ? requirePreview : !!link.require_preview;
+    typeof requirePreview === 'boolean' ? requirePreview : Boolean(link.require_preview);
 
   let nextPasswordHash = link.link_password_hash;
   if (removePassword) {
@@ -179,21 +176,24 @@ router.patch('/:id', (req, res) => {
     nextPasswordHash = bcrypt.hashSync(password, 10);
   }
 
-  updateLinkStmt.run(
-    nextIsActive ? 1 : 0,
-    nextRequirePreview ? 1 : 0,
-    nextPasswordHash,
-    req.params.id,
-    req.user.id
+  const updateResult = await pool.query(
+    `UPDATE links
+      SET is_active = $1, require_preview = $2, link_password_hash = $3
+      WHERE id = $4 AND user_id = $5
+      RETURNING *`,
+    [nextIsActive, nextRequirePreview, nextPasswordHash, req.params.id, req.user.id]
   );
-  const updated = getLinkStmt.get(req.params.id, req.user.id);
+  const updated = updateResult.rows[0];
   res.json({ link: serializeLink(updated, process.env.BASE_URL) });
 });
 
 // Delete a link
-router.delete('/:id', (req, res) => {
-  const result = deleteLinkStmt.run(req.params.id, req.user.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Link not found' });
+router.delete('/:id', async (req, res) => {
+  const result = await pool.query('DELETE FROM links WHERE id = $1 AND user_id = $2', [
+    req.params.id,
+    req.user.id,
+  ]);
+  if (result.rowCount === 0) return res.status(404).json({ error: 'Link not found' });
   res.status(204).send();
 });
 

@@ -1,14 +1,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { db } from '../db/init.js';
+import { pool } from '../db/init.js';
 
 const router = Router();
-
-const getLinkByCode = db.prepare('SELECT * FROM links WHERE short_code = ?');
-const incrementClick = db.prepare('UPDATE links SET click_count = click_count + 1 WHERE id = ?');
-const insertClick = db.prepare(
-  'INSERT INTO clicks (link_id, referrer, user_agent) VALUES (?, ?, ?)'
-);
 
 function computeStatus(link) {
   if (!link.is_active) return 'disabled';
@@ -26,8 +20,9 @@ const STATUS_MESSAGES = {
 // Metadata for the interstitial/password page. Never exposes the
 // destination URL when the link is password-protected — the whole point of
 // the password is that the destination stays hidden until it's entered.
-router.get('/:code', (req, res) => {
-  const link = getLinkByCode.get(req.params.code);
+router.get('/:code', async (req, res) => {
+  const result = await pool.query('SELECT * FROM links WHERE short_code = $1', [req.params.code]);
+  const link = result.rows[0];
   if (!link) return res.status(404).json({ error: 'Short link not found' });
 
   const status = computeStatus(link);
@@ -35,13 +30,13 @@ router.get('/:code', (req, res) => {
     return res.status(410).json({ error: STATUS_MESSAGES[status], status });
   }
 
-  const hasPassword = !!link.link_password_hash;
+  const hasPassword = Boolean(link.link_password_hash);
 
   res.json({
     shortCode: link.short_code,
     title: link.title,
     hasPassword,
-    requirePreview: !!link.require_preview,
+    requirePreview: Boolean(link.require_preview),
     originalUrl: hasPassword ? null : link.original_url,
   });
 });
@@ -51,8 +46,9 @@ router.get('/:code', (req, res) => {
 // ever counted here (or in the direct-redirect path for unprotected links),
 // never just from loading the preview page — so refreshing the preview
 // doesn't inflate the click count.
-router.post('/:code/confirm', (req, res) => {
-  const link = getLinkByCode.get(req.params.code);
+router.post('/:code/confirm', async (req, res) => {
+  const result = await pool.query('SELECT * FROM links WHERE short_code = $1', [req.params.code]);
+  const link = result.rows[0];
   if (!link) return res.status(404).json({ error: 'Short link not found' });
 
   const status = computeStatus(link);
@@ -70,8 +66,11 @@ router.post('/:code/confirm', (req, res) => {
     }
   }
 
-  incrementClick.run(link.id);
-  insertClick.run(link.id, req.get('referrer') || null, req.get('user-agent') || null);
+  await pool.query('UPDATE links SET click_count = click_count + 1 WHERE id = $1', [link.id]);
+  await pool.query(
+    'INSERT INTO clicks (link_id, referrer, user_agent) VALUES ($1, $2, $3)',
+    [link.id, req.get('referrer') || null, req.get('user-agent') || null]
+  );
 
   res.json({ originalUrl: link.original_url });
 });

@@ -147,7 +147,7 @@ export default function PreviewPage() {
           <p className="font-mono text-xs uppercase tracking-widest text-ink-soft">
             You're about to visit
           </p>
-          <h1 className="mt-3 break-words font-display text-xl font-semibold text-ink">
+          <h1 className="mt-3 wrap-break-words font-display text-xl font-semibold text-ink">
             {domain}
           </h1>
           <p className="mt-2 break-all text-sm text-ink-soft">{meta.originalUrl}</p>

@@ -1,16 +1,11 @@
 import { Router } from 'express';
-import { db } from '../db/init.js';
+import { pool } from '../db/init.js';
 
 const router = Router();
 
-const getLinkByCode = db.prepare('SELECT * FROM links WHERE short_code = ?');
-const incrementClick = db.prepare('UPDATE links SET click_count = click_count + 1 WHERE id = ?');
-const insertClick = db.prepare(
-  'INSERT INTO clicks (link_id, referrer, user_agent) VALUES (?, ?, ?)'
-);
-
-router.get('/:code', (req, res) => {
-  const link = getLinkByCode.get(req.params.code);
+router.get('/:code', async (req, res) => {
+  const result = await pool.query('SELECT * FROM links WHERE short_code = $1', [req.params.code]);
+  const link = result.rows[0];
 
   if (!link) {
     return res.status(404).json({ error: 'Short link not found' });
@@ -35,8 +30,11 @@ router.get('/:code', (req, res) => {
     return res.redirect(302, `${frontendUrl}/preview/${link.short_code}`);
   }
 
-  incrementClick.run(link.id);
-  insertClick.run(link.id, req.get('referrer') || null, req.get('user-agent') || null);
+  await pool.query('UPDATE links SET click_count = click_count + 1 WHERE id = $1', [link.id]);
+  await pool.query(
+    'INSERT INTO clicks (link_id, referrer, user_agent) VALUES ($1, $2, $3)',
+    [link.id, req.get('referrer') || null, req.get('user-agent') || null]
+  );
 
   res.redirect(302, link.original_url);
 });

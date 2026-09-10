@@ -4,7 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 
-import './db/init.js';
+import { initializeDatabase } from './db/init.js';
 import authRoutes from './routes/auth.js';
 import linkRoutes from './routes/links.js';
 import redirectRoutes from './routes/redirect.js';
@@ -12,9 +12,11 @@ import publicLinkRoutes from './routes/public.js';
 
 const app = express();
 
+
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
+
 
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -42,6 +44,12 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`URL shortener API listening on http://localhost:${PORT}`);
-});
+
+async function startServer() {
+  await initializeDatabase();
+  app.listen(PORT, () => {
+    console.log(`URL shortener API listening on http://localhost:${PORT}`);
+  });
+}
+
+startServer();
