@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-paper: #faf9f5;
+  --color-paper-dim: #f1efe6;
+  --color-ink: #16182b;
+  --color-ink-soft: #4a4d63;
+  --color-line: #ded9c9;
+  --color-accent: #3f3df2;
+  --color-accent-soft: #eceafe;
+  --color-mint: #0ea37a;
+  --color-mint-soft: #e2f6ef;
+  --color-brick: #c53d3d;
+  --color-brick-soft: #fbeaea;
+  --color-amber: #d68a1f;
+  --color-amber-soft: #faf0dd;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-paper);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Ticket-stub card: perforated edge between the short code and stats,
+   with punched notches on the left/right like a claim ticket. */
+.ticket {
+  position: relative;
+  background: white;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+.ticket::before,
+.ticket::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+.ticket::before {
+  left: -10px;
+}
+
+.ticket::after {
+  right: -10px;
+}
+
+.ticket-perforation {
+  border-top: 1.5px dashed var(--color-line);
+}
+
+@media (max-width: 640px) {
+  .ticket-perforation {
+    border-top: none;
+    border-left: 1.5px dashed var(--color-line);
+  }
+}
